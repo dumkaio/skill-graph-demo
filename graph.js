@@ -366,6 +366,7 @@ const skillData = {
 function buildElements() {
   const elements = [];
   const clusterSkillMap = {};
+  const allSkillIds = [];
 
   // Add user node
   elements.push({
@@ -393,6 +394,7 @@ function buildElements() {
     // Add skills
     cluster.skills.forEach(skill => {
       clusterSkillMap[clusterId].push(skill.level);
+      allSkillIds.push(skill.id);
 
       elements.push({
         data: {
@@ -401,7 +403,8 @@ function buildElements() {
           level: skill.level,
           cluster: clusterId,
           clusterLabel: cluster.label,
-          type: 'skill'
+          type: 'skill',
+          validated: false
         }
       });
 
@@ -410,6 +413,17 @@ function buildElements() {
         data: { source: clusterId, target: skill.id, type: 'cluster-skill' }
       });
     });
+  });
+
+  // Randomly validate ~10% of skills
+  const numToValidate = Math.ceil(allSkillIds.length * 0.1);
+  const shuffled = [...allSkillIds].sort(() => Math.random() - 0.5);
+  const validatedIds = new Set(shuffled.slice(0, numToValidate));
+  
+  elements.forEach(el => {
+    if (el.data.type === 'skill' && validatedIds.has(el.data.id)) {
+      el.data.validated = true;
+    }
   });
 
   // Calculate median level for each cluster
@@ -512,11 +526,10 @@ const cy = cytoscape({
         'text-max-width': '80px',
         'font-family': '"Outfit", -apple-system, sans-serif',
         'font-size': '10px',
+        'font-weight': 500,
         'color': '#333',
-        'text-outline-color': '#fff',
-        'text-outline-width': 2,
-        'text-outline-opacity': 1,
-        'transition-property': 'background-color, border-color, width, height, opacity, box-shadow',
+        'text-outline-width': 0,
+        'transition-property': 'background-color, width, height, opacity',
         'transition-duration': '0.25s',
         'overlay-opacity': 0
       }
@@ -559,17 +572,16 @@ const cy = cytoscape({
         'shape': 'hexagon',
         'background-color': CLUSTER_COLOR,
         'background-opacity': 1,
-        'border-width': 3,
+        'border-width': 2,
         'border-style': 'solid',
-        'border-color': '#8BB8E8',
+        'border-color': '#a8c8e8',
         'text-valign': 'center',
         'text-halign': 'center',
         'text-margin-y': 0,
         'font-size': '10px',
         'font-weight': 600,
-        'color': '#1a3a5c',
-        'text-outline-color': '#fff',
-        'text-outline-width': 2,
+        'color': '#2a4a6c',
+        'text-outline-width': 0,
         'text-max-width': '75px',
         'z-index': 100,
         'shadow-blur': 15,
@@ -587,13 +599,7 @@ const cy = cytoscape({
         'width': 32,
         'height': 32,
         'background-color': '#F6ECC9',
-        'border-width': 2,
-        'border-color': '#E8D9A0',
-        'font-size': '9px',
-        'font-weight': 500,
-        'color': '#5a4d1f',
-        'text-outline-color': '#fff',
-        'text-outline-width': 1.5,
+        'border-width': 0,
         'z-index': 10
       }
     },
@@ -604,13 +610,7 @@ const cy = cytoscape({
         'width': 36,
         'height': 36,
         'background-color': '#F6E39E',
-        'border-width': 2,
-        'border-color': '#E0CA70',
-        'font-size': '9px',
-        'font-weight': 500,
-        'color': '#5a4d1f',
-        'text-outline-color': '#fff',
-        'text-outline-width': 1.5,
+        'border-width': 0,
         'z-index': 10
       }
     },
@@ -621,13 +621,7 @@ const cy = cytoscape({
         'width': 40,
         'height': 40,
         'background-color': '#F8D247',
-        'border-width': 2,
-        'border-color': '#D9B530',
-        'font-size': '9px',
-        'font-weight': 500,
-        'color': '#4a3d10',
-        'text-outline-color': '#fff',
-        'text-outline-width': 1.5,
+        'border-width': 0,
         'z-index': 10
       }
     },
@@ -639,13 +633,7 @@ const cy = cytoscape({
         'width': 44,
         'height': 44,
         'background-color': '#B7FEE4',
-        'border-width': 2,
-        'border-color': '#7FE8C4',
-        'font-size': '9px',
-        'font-weight': 500,
-        'color': '#1a5c47',
-        'text-outline-color': '#fff',
-        'text-outline-width': 1.5,
+        'border-width': 0,
         'z-index': 10
       }
     },
@@ -656,13 +644,7 @@ const cy = cytoscape({
         'width': 48,
         'height': 48,
         'background-color': '#4CEAB1',
-        'border-width': 2,
-        'border-color': '#2FC892',
-        'font-size': '9px',
-        'font-weight': 500,
-        'color': '#0d3d2d',
-        'text-outline-color': '#fff',
-        'text-outline-width': 1.5,
+        'border-width': 0,
         'z-index': 10
       }
     },
@@ -673,13 +655,7 @@ const cy = cytoscape({
         'width': 52,
         'height': 52,
         'background-color': '#45B68D',
-        'border-width': 2,
-        'border-color': '#339970',
-        'font-size': '10px',
-        'font-weight': 500,
-        'color': '#fff',
-        'text-outline-color': '#1a5c47',
-        'text-outline-width': 1.5,
+        'border-width': 0,
         'z-index': 10
       }
     },
@@ -691,13 +667,7 @@ const cy = cytoscape({
         'width': 56,
         'height': 56,
         'background-color': '#666666',
-        'border-width': 2,
-        'border-color': '#4d4d4d',
-        'font-size': '10px',
-        'font-weight': 600,
-        'color': '#fff',
-        'text-outline-color': '#333',
-        'text-outline-width': 1.5,
+        'border-width': 0,
         'z-index': 10
       }
     },
@@ -708,13 +678,7 @@ const cy = cytoscape({
         'width': 60,
         'height': 60,
         'background-color': '#333333',
-        'border-width': 2,
-        'border-color': '#1a1a1a',
-        'font-size': '10px',
-        'font-weight': 600,
-        'color': '#fff',
-        'text-outline-color': '#000',
-        'text-outline-width': 1.5,
+        'border-width': 0,
         'z-index': 10
       }
     },
@@ -725,13 +689,7 @@ const cy = cytoscape({
         'width': 66,
         'height': 66,
         'background-color': '#000000',
-        'border-width': 3,
-        'border-color': '#4CEAB1',
-        'font-size': '10px',
-        'font-weight': 700,
-        'color': '#fff',
-        'text-outline-color': '#000',
-        'text-outline-width': 1.5,
+        'border-width': 0,
         'z-index': 15
       }
     },
@@ -771,12 +729,9 @@ const cy = cytoscape({
     {
       selector: 'node.highlighted',
       style: {
-        'border-color': '#4CEAB1',
-        'border-width': 4,
         'z-index': 2000,
-        'shadow-blur': 25,
-        'shadow-color': 'rgba(76, 234, 177, 0.6)',
-        'shadow-opacity': 1
+        'overlay-color': '#4CEAB1',
+        'overlay-opacity': 0.2
       }
     },
 
@@ -797,12 +752,9 @@ const cy = cytoscape({
     {
       selector: 'node.search-match',
       style: {
-        'border-color': '#F8D247',
-        'border-width': 4,
         'z-index': 3000,
-        'shadow-blur': 25,
-        'shadow-color': 'rgba(248, 210, 71, 0.7)',
-        'shadow-opacity': 1
+        'overlay-color': '#F8D247',
+        'overlay-opacity': 0.3
       }
     },
 
@@ -812,6 +764,20 @@ const cy = cytoscape({
         'opacity': 0.8,
         'width': 2,
         'line-color': '#4CEAB1'
+      }
+    },
+
+    // Validated skill badge - light blue checkmark
+    {
+      selector: 'node[type="skill"][?validated]',
+      style: {
+        'background-image': 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIj48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMSIgZmlsbD0iI0NGRTVGRiIgc3Ryb2tlPSIjOEJCOEU4IiBzdHJva2Utd2lkdGg9IjIiLz48cGF0aCBkPSJNNyAxMmwzIDMgNy03IiBzdHJva2U9IiM0QTkwRDkiIHN0cm9rZS13aWR0aD0iMi41IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIGZpbGw9Im5vbmUiLz48L3N2Zz4=',
+        'background-width': '18px',
+        'background-height': '18px',
+        'background-position-x': '100%',
+        'background-position-y': '0%',
+        'background-clip': 'none',
+        'bounds-expansion': 10
       }
     }
   ]
@@ -894,9 +860,9 @@ function showTooltip(node, event) {
     tooltipLevel.style.display = 'inline-flex';
     tooltipCluster.textContent = data.skillCount + ' skills in this domain';
   } else {
-    tooltipTitle.textContent = data.label;
+    tooltipTitle.textContent = data.label + (data.validated ? ' ✓' : '');
     const levelInfo = LEVELS[data.level];
-    tooltipLevel.textContent = levelInfo.name + ' (Tier ' + levelInfo.tier + ')';
+    tooltipLevel.textContent = levelInfo.name + ' (Tier ' + levelInfo.tier + ')' + (data.validated ? ' • Validated' : '');
     tooltipLevel.className = 'tooltip-level ' + getLevelCategory(data.level);
     tooltipLevel.style.display = 'inline-flex';
     tooltipCluster.textContent = 'Domain: ' + data.clusterLabel;
