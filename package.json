@@ -1,0 +1,8 @@
+{
+  "name": "skill-graph",
+  "version": "1.0.0",
+  "description": "Interactive Skill Graph Visualization",
+  "scripts": {
+    "start": "npx serve -p 3000"
+  }
+}
