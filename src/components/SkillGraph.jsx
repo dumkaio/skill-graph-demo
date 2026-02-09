@@ -3,25 +3,59 @@ import cytoscape from 'cytoscape';
 import { LEVELS, getLevelCategory, skillData } from '../data/skillsData';
 import './SkillGraph.css';
 
+const USER_NODE_ID = 'user';
+const DEFAULT_HOVER_TEXT = 'Hover over a node';
+
 const CLOUD_LAYERS = [
   { id: 'a', dx: -0.14, dy: 0.06, scale: 1.05, opacity: 0.18 },
   { id: 'b', dx: 0.15, dy: -0.11, scale: 1.2, opacity: 0.15 },
   { id: 'c', dx: 0.09, dy: 0.14, scale: 0.92, opacity: 0.13 }
 ];
 
-function buildElements() {
-  const elements = [];
-  const clusterSkillMap = {};
+const LAYOUT_CONFIG = {
+  name: 'cose',
+  animate: false,
+  nodeRepulsion: 450000,
+  idealEdgeLength: (edge) => (edge.data('type') === 'user-cluster' ? 360 : 76),
+  edgeElasticity: (edge) => (edge.data('type') === 'user-cluster' ? 180 : 50),
+  numIter: 2200,
+  padding: 100
+};
 
-  elements.push({ data: { id: 'user', label: 'Full Stack Developer', type: 'user' } });
+function closestLevelForMedian(levels) {
+  const values = levels.map((level) => LEVELS[level].value).sort((a, b) => a - b);
+  const middle = Math.floor(values.length / 2);
+  const median = values.length % 2 === 0
+    ? (values[middle - 1] + values[middle]) / 2
+    : values[middle];
 
-  Object.entries(skillData).forEach(([clusterId, cluster]) => {
-    clusterSkillMap[clusterId] = [];
+  let closestLevel = 'intermediate_2';
+  let smallestDiff = Infinity;
+  Object.entries(LEVELS).forEach(([levelKey, levelMeta]) => {
+    const diff = Math.abs(levelMeta.value - median);
+    if (diff < smallestDiff) {
+      smallestDiff = diff;
+      closestLevel = levelKey;
+    }
+  });
+  return closestLevel;
+}
+
+function buildGraphModel(data) {
+  const elements = [
+    { data: { id: USER_NODE_ID, label: 'Full Stack Developer', type: 'user' } }
+  ];
+  const clusterIds = [];
+
+  Object.entries(data).forEach(([clusterId, cluster]) => {
+    clusterIds.push(clusterId);
+    const levels = [];
+
     elements.push({ data: { id: clusterId, label: cluster.label, type: 'cluster' } });
-    elements.push({ data: { source: 'user', target: clusterId, type: 'user-cluster' } });
+    elements.push({ data: { source: USER_NODE_ID, target: clusterId, type: 'user-cluster' } });
 
     cluster.skills.forEach((skill) => {
-      clusterSkillMap[clusterId].push(skill.level);
+      levels.push(skill.level);
       elements.push({
         data: {
           id: skill.id,
@@ -34,41 +68,195 @@ function buildElements() {
       });
       elements.push({ data: { source: clusterId, target: skill.id, type: 'cluster-skill' } });
     });
+
+    const medianLevel = closestLevelForMedian(levels);
+    const clusterNode = elements.find((element) => element.data.id === clusterId);
+    clusterNode.data.medianLevel = medianLevel;
+    clusterNode.data.skillCount = levels.length;
   });
 
-  Object.entries(clusterSkillMap).forEach(([clusterId, levels]) => {
-    const values = levels.map((l) => LEVELS[l].value).sort((a, b) => a - b);
-    const mid = Math.floor(values.length / 2);
-    const median = values.length % 2 === 0 ? (values[mid - 1] + values[mid]) / 2 : values[mid];
+  return { elements, clusterIds };
+}
 
-    let closestLevel = 'intermediate_2';
-    let closestDiff = Infinity;
-    Object.entries(LEVELS).forEach(([key, data]) => {
-      const diff = Math.abs(data.value - median);
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        closestLevel = key;
+function computeStats(elements) {
+  const counters = { total: 0, beginner: 0, intermediate: 0, expert: 0 };
+  elements.forEach((element) => {
+    if (element.data.type !== 'skill') return;
+    counters.total += 1;
+    counters[getLevelCategory(element.data.level)] += 1;
+  });
+  return counters;
+}
+
+function createStyles() {
+  return [
+    {
+      selector: 'node',
+      style: {
+        label: 'data(label)',
+        'font-size': 9,
+        'font-family': 'system-ui, sans-serif',
+        'text-wrap': 'wrap',
+        'text-max-width': 80,
+        'text-valign': 'bottom',
+        'text-margin-y': 6,
+        'overlay-opacity': 0
       }
+    },
+    {
+      selector: 'node[type="user"]',
+      style: {
+        width: 120,
+        height: 120,
+        'background-color': '#111827',
+        color: '#ffffff',
+        'font-size': 13,
+        'font-weight': 700,
+        'text-valign': 'center',
+        'text-margin-y': 0,
+        'border-color': '#4ceab1',
+        'border-width': 4
+      }
+    },
+    {
+      selector: 'node[type="cluster"]',
+      style: {
+        shape: 'hexagon',
+        width: 90,
+        height: 90,
+        'background-color': '#cfe5ff',
+        'background-opacity': 1,
+        'border-color': '#90b7dd',
+        'border-width': 2,
+        'font-weight': 600,
+        'font-size': 10,
+        color: '#1e3a5f',
+        'text-valign': 'center',
+        'text-margin-y': 0
+      }
+    },
+    {
+      selector: 'node[type="skill"]',
+      style: {
+        width: (node) => LEVELS[node.data('level')].size,
+        height: (node) => LEVELS[node.data('level')].size,
+        'background-color': (node) => LEVELS[node.data('level')].color,
+        color: '#111827'
+      }
+    },
+    {
+      selector: 'edge[type="user-cluster"]',
+      style: {
+        width: 2,
+        'line-color': '#8bb8e8',
+        opacity: 0.5
+      }
+    },
+    {
+      selector: 'edge[type="cluster-skill"]',
+      style: {
+        width: 1,
+        'line-color': '#d1d5db',
+        opacity: 0.35
+      }
+    },
+    { selector: '.highlighted', style: { 'overlay-color': '#4ceab1', 'overlay-opacity': 0.2 } },
+    { selector: 'edge.highlighted', style: { width: 2, opacity: 0.8, 'line-color': '#4ceab1' } },
+    { selector: '.faded', style: { opacity: 0.12 } },
+    { selector: '.search-match', style: { 'overlay-color': '#f8d247', 'overlay-opacity': 0.25 } }
+  ];
+}
+
+function getTooltipPayload(nodeData, totalSkills, clusterCount) {
+  if (nodeData.type === 'skill') {
+    const level = LEVELS[nodeData.level];
+    return {
+      title: nodeData.label,
+      level: `${level.name} (Tier ${level.tier})`,
+      cluster: `Domain: ${nodeData.clusterLabel}`,
+      levelClass: getLevelCategory(nodeData.level),
+      hoverText: `${nodeData.label} - ${level.name} T${level.tier} - ${nodeData.clusterLabel}`
+    };
+  }
+
+  if (nodeData.type === 'cluster') {
+    const level = LEVELS[nodeData.medianLevel];
+    return {
+      title: nodeData.label,
+      level: `Median: ${level.name} (Tier ${level.tier})`,
+      cluster: `${nodeData.skillCount} skills in this domain`,
+      levelClass: getLevelCategory(nodeData.medianLevel),
+      hoverText: `${nodeData.label} - ${nodeData.skillCount} skills`
+    };
+  }
+
+  return {
+    title: nodeData.label,
+    level: '',
+    cluster: `${totalSkills} skills across ${clusterCount} domains`,
+    levelClass: '',
+    hoverText: `${nodeData.label} - ${totalSkills} skills`
+  };
+}
+
+function computeCloudOverlays(cy, clusterIds) {
+  const centers = clusterIds
+    .map((clusterId) => {
+      const node = cy.$id(clusterId);
+      if (node.empty()) return null;
+      return {
+        clusterId,
+        node,
+        position: node.renderedPosition()
+      };
+    })
+    .filter(Boolean);
+
+  return centers.flatMap(({ clusterId, node, position }) => {
+    const skills = cy.nodes(`[cluster="${clusterId}"]`);
+    let farthestSkillDistance = 0;
+    skills.forEach((skillNode) => {
+      const p = skillNode.renderedPosition();
+      const distance = Math.hypot(p.x - position.x, p.y - position.y);
+      if (distance > farthestSkillDistance) farthestSkillDistance = distance;
     });
 
-    const clusterNode = elements.find((e) => e.data.id === clusterId);
-    clusterNode.data.medianLevel = closestLevel;
-    clusterNode.data.skillCount = levels.length;
+    let nearestClusterDistance = Infinity;
+    centers.forEach((other) => {
+      if (other.clusterId === clusterId) return;
+      const distance = Math.hypot(other.position.x - position.x, other.position.y - position.y);
+      if (distance < nearestClusterDistance) nearestClusterDistance = distance;
+    });
 
+    const naturalSize = Math.max(240, farthestSkillDistance * 2.0);
+    const cappedSize = Number.isFinite(nearestClusterDistance)
+      ? Math.min(naturalSize, nearestClusterDistance * 0.95)
+      : naturalSize;
+
+    const level = node.data('medianLevel');
+    const color = LEVELS[level]?.color || '#cfe5ff';
+
+    return CLOUD_LAYERS.map((layer) => ({
+      id: `${clusterId}-${layer.id}`,
+      clusterId,
+      color,
+      opacity: layer.opacity,
+      left: position.x + cappedSize * layer.dx,
+      top: position.y + cappedSize * layer.dy,
+      size: cappedSize * layer.scale
+    }));
   });
-
-  return elements;
 }
 
 export default function SkillGraph() {
-  const graphRef = useRef(null);
   const containerRef = useRef(null);
   const cyRef = useRef(null);
   const searchRef = useRef('');
+
   const [search, setSearch] = useState('');
   const [hoverClusterId, setHoverClusterId] = useState(null);
   const [clouds, setClouds] = useState([]);
-  const [hovered, setHovered] = useState('Hover over a node');
+  const [hovered, setHovered] = useState(DEFAULT_HOVER_TEXT);
   const [tooltip, setTooltip] = useState({
     visible: false,
     x: 0,
@@ -79,272 +267,103 @@ export default function SkillGraph() {
     levelClass: ''
   });
 
-  const elements = useMemo(() => buildElements(), []);
-
-  const stats = useMemo(() => {
-    const counters = { total: 0, beginner: 0, intermediate: 0, expert: 0 };
-    elements.forEach((el) => {
-      if (el.data.type === 'skill') {
-        counters.total += 1;
-        counters[getLevelCategory(el.data.level)] += 1;
-      }
-    });
-    return counters;
-  }, [elements]);
+  const model = useMemo(() => buildGraphModel(skillData), []);
+  const stats = useMemo(() => computeStats(model.elements), [model.elements]);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const layoutConfig = {
-      name: 'cose',
-      animate: false,
-      nodeRepulsion: 450000,
-      idealEdgeLength: (edge) => (edge.data('type') === 'user-cluster' ? 360 : 76),
-      edgeElasticity: (edge) => (edge.data('type') === 'user-cluster' ? 180 : 50),
-      numIter: 2200,
-      padding: 100
-    };
-
     const cy = cytoscape({
       container: containerRef.current,
-      elements,
+      elements: model.elements,
       wheelSensitivity: 0.25,
-      style: [
-        {
-          selector: 'node',
-          style: {
-            label: 'data(label)',
-            'font-size': 9,
-            'font-family': 'system-ui, sans-serif',
-            'text-wrap': 'wrap',
-            'text-max-width': 80,
-            'text-valign': 'bottom',
-            'text-margin-y': 6,
-            'overlay-opacity': 0
-          }
-        },
-        {
-          selector: 'node[type="user"]',
-          style: {
-            width: 120,
-            height: 120,
-            'background-color': '#111827',
-            color: '#ffffff',
-            'font-size': 13,
-            'font-weight': 700,
-            'text-valign': 'center',
-            'text-margin-y': 0,
-            'border-color': '#4ceab1',
-            'border-width': 4
-          }
-        },
-        {
-          selector: 'node[type="cluster"]',
-          style: {
-            shape: 'hexagon',
-            width: 90,
-            height: 90,
-            'background-color': '#cfe5ff',
-            'background-opacity': 1,
-            'border-color': '#90b7dd',
-            'border-width': 2,
-            'font-weight': 600,
-            'font-size': 10,
-            color: '#1e3a5f',
-            'text-valign': 'center',
-            'text-margin-y': 0
-          }
-        },
-        {
-          selector: 'node[type="skill"]',
-          style: {
-            width: (node) => LEVELS[node.data('level')].size,
-            height: (node) => LEVELS[node.data('level')].size,
-            'background-color': (node) => LEVELS[node.data('level')].color,
-            color: '#111827'
-          }
-        },
-        {
-          selector: 'edge[type="user-cluster"]',
-          style: {
-            width: 2,
-            'line-color': '#8bb8e8',
-            opacity: 0.5
-          }
-        },
-        {
-          selector: 'edge[type="cluster-skill"]',
-          style: {
-            width: 1,
-            'line-color': '#d1d5db',
-            opacity: 0.35
-          }
-        },
-        { selector: '.highlighted', style: { 'overlay-color': '#4ceab1', 'overlay-opacity': 0.2 } },
-        { selector: 'edge.highlighted', style: { width: 2, opacity: 0.8, 'line-color': '#4ceab1' } },
-        { selector: '.faded', style: { opacity: 0.12 } },
-        { selector: '.search-match', style: { 'overlay-color': '#f8d247', 'overlay-opacity': 0.25 } }
-      ],
+      style: createStyles(),
       layout: { name: 'preset' }
     });
 
-    const updateCloudOverlays = () => {
-      const clusterIds = Object.keys(skillData);
-      const centers = clusterIds
-        .map((clusterId) => {
-          const n = cy.$id(clusterId);
-          if (n.empty()) return null;
-          return { clusterId, pos: n.renderedPosition(), node: n };
-        })
-        .filter(Boolean);
-
-      const nextClouds = centers.flatMap(({ clusterId, pos, node }) => {
-        const skillNodes = cy.nodes(`[cluster="${clusterId}"]`);
-        let maxDistance = 0;
-        skillNodes.forEach((skillNode) => {
-          const sp = skillNode.renderedPosition();
-          const d = Math.hypot(sp.x - pos.x, sp.y - pos.y);
-          if (d > maxDistance) maxDistance = d;
-        });
-
-        let nearestClusterDistance = Infinity;
-        centers.forEach((other) => {
-          if (other.clusterId === clusterId) return;
-          const d = Math.hypot(other.pos.x - pos.x, other.pos.y - pos.y);
-          if (d < nearestClusterDistance) nearestClusterDistance = d;
-        });
-
-        const naturalSize = Math.max(240, maxDistance * 2.0);
-        const spacingCap = Number.isFinite(nearestClusterDistance)
-          ? nearestClusterDistance * 0.95
-          : naturalSize;
-        const baseSize = Math.min(naturalSize, spacingCap);
-
-        const level = node.data('medianLevel');
-        const color = LEVELS[level]?.color || '#cfe5ff';
-        return CLOUD_LAYERS.map((layer) => ({
-          id: `${clusterId}-${layer.id}`,
-          clusterId,
-          color,
-          opacity: layer.opacity,
-          left: pos.x + baseSize * layer.dx,
-          top: pos.y + baseSize * layer.dy,
-          size: baseSize * layer.scale
-        }));
-      });
-      setClouds(nextClouds);
+    const refreshClouds = () => {
+      setClouds(computeCloudOverlays(cy, model.clusterIds));
     };
 
-    const setTooltipFromNode = (node, event) => {
-      const data = node.data();
-      const x = event.originalEvent?.clientX ?? 0;
-      const y = event.originalEvent?.clientY ?? 0;
+    const applyClusterFocus = (clusterId) => {
+      const clusterNode = cy.$id(clusterId);
+      const clusterSkills = cy.nodes(`[cluster="${clusterId}"]`);
+      const userNode = cy.$id(USER_NODE_ID);
+      const userEdge = cy.edges(`[source="${USER_NODE_ID}"][target="${clusterId}"]`);
+      const skillEdges = clusterSkills.connectedEdges();
 
-      if (data.type === 'skill') {
-        const level = LEVELS[data.level];
-        setHovered(`${data.label} - ${level.name} T${level.tier} - ${data.clusterLabel}`);
-        setTooltip({
-          visible: true,
-          x: x + 15,
-          y: y + 15,
-          title: data.label,
-          level: `${level.name} (Tier ${level.tier})`,
-          cluster: `Domain: ${data.clusterLabel}`,
-          levelClass: getLevelCategory(data.level)
-        });
-        return;
-      }
+      cy.elements().addClass('faded');
+      clusterSkills.add(clusterNode).removeClass('faded');
+      userNode.removeClass('faded');
+      userEdge.removeClass('faded').addClass('highlighted');
+      skillEdges.removeClass('faded');
+    };
 
-      if (data.type === 'cluster') {
-        const level = LEVELS[data.medianLevel];
-        setHovered(`${data.label} - ${data.skillCount} skills`);
-        setTooltip({
-          visible: true,
-          x: x + 15,
-          y: y + 15,
-          title: data.label,
-          level: `Median: ${level.name} (Tier ${level.tier})`,
-          cluster: `${data.skillCount} skills in this domain`,
-          levelClass: getLevelCategory(data.medianLevel)
-        });
-        return;
-      }
-
-      setHovered(`${data.label} - ${stats.total} skills`);
-      setTooltip({
-        visible: true,
-        x: x + 15,
-        y: y + 15,
-        title: data.label,
-        level: '',
-        cluster: `${stats.total} skills across ${Object.keys(skillData).length} domains`,
-        levelClass: ''
-      });
+    const clearFocus = () => {
+      cy.elements().removeClass('faded highlighted');
+      setHoverClusterId(null);
     };
 
     cyRef.current = cy;
-    const layout = cy.layout(layoutConfig);
-    layout.run();
+    cy.layout(LAYOUT_CONFIG).run();
 
-    cy.on('layoutstop', () => {
-      updateCloudOverlays();
-    });
-    cy.on('render', updateCloudOverlays);
-    cy.on('zoom pan resize', updateCloudOverlays);
+    cy.on('layoutstop', refreshClouds);
+    cy.on('zoom pan resize', refreshClouds);
+    cy.on('drag free', 'node[type="cluster"]', refreshClouds);
+    cy.ready(refreshClouds);
 
-    cy.on('mouseover', 'node', (e) => {
-      setTooltipFromNode(e.target, e);
-      const data = e.target.data();
-      e.target.addClass('highlighted');
+    cy.on('mouseover', 'node', (event) => {
+      const node = event.target;
+      const data = node.data();
+      const payload = getTooltipPayload(data, stats.total, model.clusterIds.length);
+
+      node.addClass('highlighted');
+      setHovered(payload.hoverText);
+      setTooltip({
+        visible: true,
+        x: (event.originalEvent?.clientX ?? 0) + 15,
+        y: (event.originalEvent?.clientY ?? 0) + 15,
+        title: payload.title,
+        level: payload.level,
+        cluster: payload.cluster,
+        levelClass: payload.levelClass
+      });
 
       if (searchRef.current || data.type !== 'cluster') {
-        if (data.type !== 'cluster') {
-          setHoverClusterId(null);
-        }
+        if (data.type !== 'cluster') setHoverClusterId(null);
         return;
       }
 
       setHoverClusterId(data.id);
-      const clusterId = e.target.id();
-      const clusterSkills = cy.nodes(`[cluster="${clusterId}"]`);
-      const clusterWithSkills = clusterSkills.add(e.target);
-      const userNode = cy.$id('user');
-      const userEdge = cy.edges(`[source="user"][target="${clusterId}"]`);
-      const skillEdges = clusterSkills.connectedEdges();
-
-      cy.elements().addClass('faded');
-      clusterWithSkills.removeClass('faded');
-      userNode.removeClass('faded');
-      userEdge.removeClass('faded').addClass('highlighted');
-      skillEdges.removeClass('faded');
+      applyClusterFocus(data.id);
     });
 
-    cy.on('mousemove', 'node', (e) => {
-      setTooltip((prev) => ({ ...prev, x: e.originalEvent.clientX + 15, y: e.originalEvent.clientY + 15 }));
+    cy.on('mousemove', 'node', (event) => {
+      setTooltip((prev) => ({
+        ...prev,
+        x: (event.originalEvent?.clientX ?? 0) + 15,
+        y: (event.originalEvent?.clientY ?? 0) + 15
+      }));
     });
 
-    cy.on('mouseout', 'node', (e) => {
+    cy.on('mouseout', 'node', (event) => {
+      event.target.removeClass('highlighted');
       setTooltip((prev) => ({ ...prev, visible: false }));
-      setHovered('Hover over a node');
-      e.target.removeClass('highlighted');
-      setHoverClusterId(null);
+      setHovered(DEFAULT_HOVER_TEXT);
 
-      if (searchRef.current || e.target.data('type') !== 'cluster') {
-        return;
+      if (!searchRef.current && event.target.data('type') === 'cluster') {
+        clearFocus();
+      } else {
+        setHoverClusterId(null);
       }
-
-      cy.elements().removeClass('faded highlighted');
     });
-
-    cy.on('drag free', 'node[type="cluster"]', updateCloudOverlays);
-    cy.ready(updateCloudOverlays);
 
     return () => {
       cy.destroy();
       cyRef.current = null;
       setClouds([]);
     };
-  }, [elements, stats.total]);
+  }, [model, stats.total]);
 
   useEffect(() => {
     const cy = cyRef.current;
@@ -353,9 +372,14 @@ export default function SkillGraph() {
     const query = search.trim().toLowerCase();
     searchRef.current = query;
     cy.elements().removeClass('faded search-match highlighted');
+
     if (!query) return;
 
-    const matches = cy.nodes().filter((n) => (n.data('label') || '').toLowerCase().includes(query));
+    const matches = cy.nodes().filter((node) => {
+      const label = node.data('label') || '';
+      return label.toLowerCase().includes(query);
+    });
+
     if (matches.length === 0) return;
 
     cy.elements().addClass('faded');
@@ -365,7 +389,7 @@ export default function SkillGraph() {
     matches.forEach((node) => {
       if (node.data('type') === 'skill') {
         cy.$id(node.data('cluster')).removeClass('faded');
-        cy.$id('user').removeClass('faded');
+        cy.$id(USER_NODE_ID).removeClass('faded');
       }
     });
   }, [search]);
@@ -373,21 +397,29 @@ export default function SkillGraph() {
   const zoomIn = () => {
     const cy = cyRef.current;
     if (!cy) return;
-    cy.zoom({ level: cy.zoom() * 1.2, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+    cy.zoom({
+      level: cy.zoom() * 1.2,
+      renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+    });
   };
 
   const zoomOut = () => {
     const cy = cyRef.current;
     if (!cy) return;
-    cy.zoom({ level: cy.zoom() / 1.2, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+    cy.zoom({
+      level: cy.zoom() / 1.2,
+      renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 }
+    });
   };
 
-  const fit = () => {
+  const resetView = () => {
     const cy = cyRef.current;
     if (!cy) return;
-    cy.elements().removeClass('faded search-match highlighted');
+
     searchRef.current = '';
     setSearch('');
+    setHoverClusterId(null);
+    cy.elements().removeClass('faded search-match highlighted');
     cy.fit(undefined, 70);
   };
 
@@ -406,19 +438,20 @@ export default function SkillGraph() {
       <div className="tools">
         <button onClick={zoomIn} type="button">+</button>
         <button onClick={zoomOut} type="button">-</button>
-        <button onClick={fit} type="button">Reset</button>
+        <button onClick={resetView} type="button">Reset</button>
         <input
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(event) => setSearch(event.target.value)}
           placeholder="Search skills"
         />
       </div>
 
-      <div className="skill-graph" ref={graphRef}>
+      <div className="skill-graph">
         <div className="smoke-layer">
           {clouds.map((cloud) => {
             const faded = hoverClusterId && hoverClusterId !== cloud.clusterId;
             const seed = cloud.id.charCodeAt(cloud.id.length - 1) % 9;
+
             return (
               <span
                 key={cloud.id}
@@ -438,6 +471,7 @@ export default function SkillGraph() {
         </div>
         <div ref={containerRef} className="skill-graph-canvas" />
       </div>
+
       <div
         className={`tooltip ${tooltip.visible ? 'visible' : ''}`}
         style={{ left: tooltip.x, top: tooltip.y }}
@@ -446,6 +480,7 @@ export default function SkillGraph() {
         {tooltip.level ? <div className={`tooltip-level ${tooltip.levelClass}`}>{tooltip.level}</div> : null}
         <div className="tooltip-cluster">{tooltip.cluster}</div>
       </div>
+
       <footer className="hover-info">{hovered}</footer>
     </section>
   );
