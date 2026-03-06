@@ -5,12 +5,25 @@ import './SkillGraph.css';
 
 const USER_NODE_ID = 'user';
 const DEFAULT_HOVER_TEXT = 'Hover over a node';
+const USER_PROFILE = {
+  name: 'Alex Johnson',
+  title: 'Full Stack Developer',
+  location: 'Helsinki',
+  years: 8
+};
 
 const CLOUD_LAYERS = [
   { id: 'a', dx: -0.14, dy: 0.06, scale: 1.05, opacity: 0.18 },
   { id: 'b', dx: 0.15, dy: -0.11, scale: 1.2, opacity: 0.15 },
   { id: 'c', dx: 0.09, dy: 0.14, scale: 0.92, opacity: 0.13 }
 ];
+
+const DRAG_MOTION = {
+  amplitude: 7,
+  settleMs: 300,
+  spring: 0.11,
+  damping: 0.82
+};
 
 const LAYOUT_CONFIG = {
   name: 'cose',
@@ -106,16 +119,15 @@ function createStyles() {
     {
       selector: 'node[type="user"]',
       style: {
-        width: 120,
-        height: 120,
-        'background-color': '#111827',
-        color: '#ffffff',
-        'font-size': 13,
-        'font-weight': 700,
-        'text-valign': 'center',
-        'text-margin-y': 0,
-        'border-color': '#4ceab1',
-        'border-width': 4
+        // Invisible anchor node with large footprint so layout keeps space for HTML card.
+        width: 660,
+        height: 360,
+        'background-color': '#000000',
+        'background-opacity': 0,
+        color: '#ffffff00',
+        'font-size': 1,
+        'text-opacity': 0,
+        'border-width': 0
       }
     },
     {
@@ -256,6 +268,7 @@ export default function SkillGraph() {
   const [search, setSearch] = useState('');
   const [hoverClusterId, setHoverClusterId] = useState(null);
   const [clouds, setClouds] = useState([]);
+  const [userCardPosition, setUserCardPosition] = useState({ x: 0, y: 0, zoom: 1 });
   const [hovered, setHovered] = useState(DEFAULT_HOVER_TEXT);
   const [tooltip, setTooltip] = useState({
     visible: false,
@@ -285,6 +298,13 @@ export default function SkillGraph() {
       setClouds(computeCloudOverlays(cy, model.clusterIds));
     };
 
+    const refreshUserCard = () => {
+      const userNode = cy.$id(USER_NODE_ID);
+      if (userNode.empty()) return;
+      const position = userNode.renderedPosition();
+      setUserCardPosition({ x: position.x, y: position.y, zoom: cy.zoom() });
+    };
+
     const applyClusterFocus = (clusterId) => {
       const clusterNode = cy.$id(clusterId);
       const clusterSkills = cy.nodes(`[cluster="${clusterId}"]`);
@@ -304,13 +324,152 @@ export default function SkillGraph() {
       setHoverClusterId(null);
     };
 
+    const clusterDragOffsets = new Map();
+    const dragMotion = {
+      rafId: null,
+      clusterId: null,
+      dragging: false,
+      settleUntil: 0,
+      lastTs: 0,
+      prevClusterX: 0,
+      prevClusterY: 0
+    };
+
+    const stopMotionLoop = () => {
+      if (dragMotion.rafId) {
+        cancelAnimationFrame(dragMotion.rafId);
+        dragMotion.rafId = null;
+      }
+    };
+
+    const motionFrame = (ts) => {
+      if (!dragMotion.clusterId) {
+        stopMotionLoop();
+        return;
+      }
+
+      const clusterNode = cy.$id(dragMotion.clusterId);
+      if (clusterNode.empty()) {
+        stopMotionLoop();
+        return;
+      }
+
+      const clusterPos = clusterNode.position();
+      if (!dragMotion.lastTs) {
+        dragMotion.lastTs = ts;
+        dragMotion.prevClusterX = clusterPos.x;
+        dragMotion.prevClusterY = clusterPos.y;
+      }
+
+      const dt = Math.max(0.016, Math.min(0.04, (ts - dragMotion.lastTs) / 1000));
+      const cvx = (clusterPos.x - dragMotion.prevClusterX) / dt;
+      const cvy = (clusterPos.y - dragMotion.prevClusterY) / dt;
+      const speed = Math.hypot(cvx, cvy);
+      const dirX = speed > 0.001 ? cvx / speed : 1;
+      const dirY = speed > 0.001 ? cvy / speed : 0;
+      const perpX = -dirY;
+      const perpY = dirX;
+
+      const settling = !dragMotion.dragging;
+      const settleProgress = settling
+        ? Math.max(0, (dragMotion.settleUntil - performance.now()) / DRAG_MOTION.settleMs)
+        : 1;
+
+      const skills = cy.nodes(`[cluster="${dragMotion.clusterId}"]`);
+      skills.forEach((skill) => {
+        const state = clusterDragOffsets.get(skill.id());
+        if (!state) return;
+
+        const baseX = clusterPos.x + state.dx;
+        const baseY = clusterPos.y + state.dy;
+        const wave = Math.sin(ts * 0.012 + state.phase);
+        const wave2 = Math.cos(ts * 0.009 + state.phase * 1.2);
+        const wobbleAmp = DRAG_MOTION.amplitude * (0.5 + Math.min(1, speed / 450)) * settleProgress;
+        const wobbleX = (perpX * wave + dirX * wave2 * 0.45) * wobbleAmp;
+        const wobbleY = (perpY * wave + dirY * wave2 * 0.45) * wobbleAmp;
+        const targetX = baseX + wobbleX;
+        const targetY = baseY + wobbleY;
+
+        const p = skill.position();
+        state.vx = state.vx * DRAG_MOTION.damping + (targetX - p.x) * DRAG_MOTION.spring;
+        state.vy = state.vy * DRAG_MOTION.damping + (targetY - p.y) * DRAG_MOTION.spring;
+
+        skill.position({
+          x: p.x + state.vx,
+          y: p.y + state.vy
+        });
+      });
+
+      dragMotion.lastTs = ts;
+      dragMotion.prevClusterX = clusterPos.x;
+      dragMotion.prevClusterY = clusterPos.y;
+
+      if (dragMotion.dragging || performance.now() < dragMotion.settleUntil) {
+        dragMotion.rafId = requestAnimationFrame(motionFrame);
+      } else {
+        // Final hard snap to exact anchored positions after settle window.
+        skills.forEach((skill) => {
+          const state = clusterDragOffsets.get(skill.id());
+          if (!state) return;
+          skill.position({
+            x: clusterPos.x + state.dx,
+            y: clusterPos.y + state.dy
+          });
+        });
+        clusterDragOffsets.clear();
+        dragMotion.clusterId = null;
+        stopMotionLoop();
+      }
+    };
+
     cyRef.current = cy;
     cy.layout(LAYOUT_CONFIG).run();
+    cy.nodes('[type="skill"], [type="user"]').ungrabify();
 
     cy.on('layoutstop', refreshClouds);
+    cy.on('layoutstop', refreshUserCard);
     cy.on('zoom pan resize', refreshClouds);
+    cy.on('zoom pan resize', refreshUserCard);
     cy.on('drag free', 'node[type="cluster"]', refreshClouds);
+    cy.on('drag free', 'node[type="cluster"]', refreshUserCard);
     cy.ready(refreshClouds);
+    cy.ready(refreshUserCard);
+
+    cy.on('grab', 'node[type="cluster"]', (event) => {
+      const cluster = event.target;
+      const clusterId = cluster.id();
+      const clusterPosition = cluster.position();
+      const skills = cy.nodes(`[cluster="${clusterId}"]`);
+
+      clusterDragOffsets.clear();
+      skills.forEach((skill) => {
+        const skillPosition = skill.position();
+        clusterDragOffsets.set(skill.id(), {
+          dx: skillPosition.x - clusterPosition.x,
+          dy: skillPosition.y - clusterPosition.y,
+          vx: 0,
+          vy: 0,
+          phase: skill.id().charCodeAt(skill.id().length - 1) * 0.19
+        });
+      });
+
+      dragMotion.clusterId = clusterId;
+      dragMotion.dragging = true;
+      dragMotion.settleUntil = 0;
+      dragMotion.lastTs = 0;
+      dragMotion.prevClusterX = clusterPosition.x;
+      dragMotion.prevClusterY = clusterPosition.y;
+      stopMotionLoop();
+      dragMotion.rafId = requestAnimationFrame(motionFrame);
+    });
+
+    cy.on('free', 'node[type="cluster"]', (event) => {
+      const cluster = event.target;
+      const clusterId = cluster.id();
+      if (dragMotion.clusterId !== clusterId) return;
+      dragMotion.dragging = false;
+      dragMotion.settleUntil = performance.now() + DRAG_MOTION.settleMs;
+    });
 
     cy.on('mouseover', 'node', (event) => {
       const node = event.target;
@@ -359,6 +518,7 @@ export default function SkillGraph() {
     });
 
     return () => {
+      stopMotionLoop();
       cy.destroy();
       cyRef.current = null;
       setClouds([]);
@@ -386,11 +546,23 @@ export default function SkillGraph() {
     matches.removeClass('faded').addClass('search-match');
     matches.connectedEdges().removeClass('faded');
 
+    const focusElements = matches.union(matches.connectedEdges());
     matches.forEach((node) => {
       if (node.data('type') === 'skill') {
         cy.$id(node.data('cluster')).removeClass('faded');
         cy.$id(USER_NODE_ID).removeClass('faded');
+        focusElements.merge(cy.$id(node.data('cluster')));
+        focusElements.merge(cy.$id(USER_NODE_ID));
       }
+    });
+
+    cy.animate({
+      fit: {
+        eles: focusElements,
+        padding: 120
+      },
+      duration: 260,
+      easing: 'ease-out-cubic'
     });
   }, [search]);
 
@@ -468,6 +640,25 @@ export default function SkillGraph() {
               />
             );
           })}
+        </div>
+        <div
+          className="user-card-overlay"
+          style={{
+            left: userCardPosition.x,
+            top: userCardPosition.y,
+            transform: `translate(-50%, -50%) scale(${userCardPosition.zoom})`
+          }}
+        >
+          <div className="user-card-name">{USER_PROFILE.name}</div>
+          <div className="user-card-title">{USER_PROFILE.title}</div>
+          <div className="user-card-meta">
+            <span>{USER_PROFILE.location}</span>
+            <span>{USER_PROFILE.years} yrs exp</span>
+          </div>
+          <div className="user-card-stats">
+            <span>{stats.total} skills</span>
+            <span>{model.clusterIds.length} domains</span>
+          </div>
         </div>
         <div ref={containerRef} className="skill-graph-canvas" />
       </div>

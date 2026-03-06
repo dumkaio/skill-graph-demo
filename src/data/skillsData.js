@@ -16,7 +16,7 @@ export function getLevelCategory(level) {
   return 'expert';
 }
 
-export const skillData = {
+const baseSkillData = {
   languages: {
     label: 'Programming Languages',
     skills: [
@@ -316,3 +316,43 @@ export const skillData = {
     ]
   }
 };
+
+// Demo profile: vary both skill counts and level distribution by cluster.
+// This keeps the view realistic for testing while making colors clearly diverse.
+const DEMO_CLUSTER_PROFILE = {
+  languages: { count: 14, levelPool: ['expert_3', 'expert_2', 'expert_1', 'intermediate_3'] },
+  backend: { count: 11, levelPool: ['expert_2', 'expert_1', 'intermediate_3', 'intermediate_2'] },
+  frontend: { count: 13, levelPool: ['expert_2', 'intermediate_3', 'intermediate_2', 'expert_1'] },
+  databases: { count: 8, levelPool: ['intermediate_3', 'intermediate_2', 'intermediate_1', 'beginner_3'] },
+  devops: { count: 10, levelPool: ['intermediate_3', 'intermediate_2', 'beginner_3', 'intermediate_1'] },
+  cloud: { count: 7, levelPool: ['beginner_2', 'beginner_3', 'intermediate_1'] },
+  datascience: { count: 12, levelPool: ['intermediate_2', 'intermediate_3', 'expert_1', 'beginner_3'] },
+  ai: { count: 9, levelPool: ['intermediate_3', 'intermediate_2', 'expert_1', 'intermediate_1'] },
+  testing: { count: 6, levelPool: ['intermediate_2', 'intermediate_1', 'beginner_3'] },
+  security: { count: 5, levelPool: ['beginner_2', 'beginner_3', 'intermediate_1'] },
+  tools: { count: 9, levelPool: ['expert_2', 'expert_1', 'intermediate_2', 'intermediate_1'] },
+  architecture: { count: 8, levelPool: ['intermediate_3', 'intermediate_2', 'intermediate_1', 'beginner_3'] },
+  mobile: { count: 5, levelPool: ['beginner_2', 'beginner_3', 'intermediate_1'] },
+  soft: { count: 7, levelPool: ['expert_1', 'intermediate_3', 'intermediate_2', 'expert_2'] },
+  methodologies: { count: 6, levelPool: ['intermediate_2', 'intermediate_1', 'beginner_3'] },
+  hobbies: { count: 4, levelPool: ['beginner_2', 'beginner_3', 'intermediate_1'] }
+};
+
+function applyDemoProfile(data) {
+  return Object.fromEntries(
+    Object.entries(data).map(([clusterId, cluster]) => {
+      const profile = DEMO_CLUSTER_PROFILE[clusterId];
+      if (!profile) return [clusterId, cluster];
+
+      const limitedSkills = cluster.skills.slice(0, profile.count);
+      const leveledSkills = limitedSkills.map((skill, index) => ({
+        ...skill,
+        level: profile.levelPool[index % profile.levelPool.length]
+      }));
+
+      return [clusterId, { ...cluster, skills: leveledSkills }];
+    })
+  );
+}
+
+export const skillData = applyDemoProfile(baseSkillData);
